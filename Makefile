@@ -1,5 +1,5 @@
 CC ?= gcc
-CFLAGS ?=
+CFLAGS ?= -fno-stack-protector
 LD ?= ld
 LDFLAGS ?=
 AS ?= as
