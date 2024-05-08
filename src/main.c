@@ -19,6 +19,7 @@ enum syscall {
     SYS_OPEN = 2,
     SYS_CLOSE = 3,
     SYS_EXIT = 60,
+    SYS_CLOCK_GETTIME = 228,
 };
 
 enum error_code {
@@ -92,6 +93,29 @@ static void exit(i32 error_code) {
     syscall1(SYS_EXIT, (u64)error_code);
 }
 
+enum clock_id {
+    CLOCK_MONOTONIC = 1,
+};
+
+struct timespec {
+    i64 sec;
+    i64 nsec;
+};
+
+static i32 clock_gettime(i32 clock_id, struct timespec *timespec) {
+    u64 return_value = syscall2(
+        SYS_CLOCK_GETTIME,
+        (u64)clock_id,
+        (u64)timespec
+    );
+    return syscall_error(return_value);
+}
+
+static i64 time_since_ns(struct timespec *end, struct timespec *start) {
+    i64 seconds = end->sec - start->sec;
+    return (seconds * 1000L * 1000L * 1000L) + end->nsec - start->nsec;
+}
+
 enum std_fd {
     STDIN = 0,
     STDOUT = 1,
@@ -101,34 +125,36 @@ enum std_fd {
 enum main_error {
     MAIN_ERROR_NONE = 0,
     MAIN_ERROR_WRITE_STDOUT,
-    MAIN_ERROR_READ_NAME,
+    MAIN_ERROR_CLOCK_GETTIME,
 };
 
 i32 main(i32 argc, char **argv) {
+    struct timespec last, now;
+    i32 error = clock_gettime(CLOCK_MONOTONIC, &last);
+    if (error) {
+        return MAIN_ERROR_CLOCK_GETTIME;
+    }
+
     i64 len;
-    i32 name_fd = open("name.txt", O_RDONLY, 0);
-    if (name_fd < 0) {
-        char question[] = "What is your name?\n";
-        len = write(STDOUT, question, sizeof(question));
-        if (len < 0){
-            return MAIN_ERROR_WRITE_STDOUT;
+    i32 steps = 0;
+    while (steps < 5) {
+        i32 error = clock_gettime(CLOCK_MONOTONIC, &now);
+        if (error) {
+            return MAIN_ERROR_CLOCK_GETTIME;
         }
-        name_fd = STDIN;
+
+        if (time_since_ns(&now, &last) >= 1000L * 1000L * 1000L) {
+            last = now;
+            steps += 1;
+
+            len = write(STDOUT, ".", 1);
+            if (len < 0) {
+                return MAIN_ERROR_WRITE_STDOUT;
+            }
+        }
     }
 
-    char name[255];
-    i64 name_len = read(name_fd, name, sizeof(name));
-    if (name_len < 0) {
-        return MAIN_ERROR_READ_NAME;
-    }
-
-    char greeting1[] = "Hello ";
-    len = write(STDOUT, greeting1, sizeof(greeting1) - 1);
-    if (len < 0) {
-        return MAIN_ERROR_WRITE_STDOUT;
-    }
-
-    len = write(STDOUT, name, name_len);
+    len = write(STDOUT, "\n", 1);
     if (len < 0) {
         return MAIN_ERROR_WRITE_STDOUT;
     }
