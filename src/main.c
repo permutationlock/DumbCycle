@@ -235,6 +235,7 @@ void *alloc(struct arena *arena, i64 size);
 
 enum ioctl_type {
     IOCTL_EV = (i32)'E',
+    IOCTL_DRM = (i32)'d',
 };
 
 enum ev_ioctl {
@@ -379,14 +380,490 @@ struct input_event {
     i32 value;
 };
 
+enum drm_ioctl {
+    DRM_IOCTL_MODE_GET_RESOURCES = 0xa0,
+    DRM_IOCTL_MODE_GET_CONNECTOR = 0xa7,
+    DRM_IOCTL_MODE_GET_ENCODER = 0xa6,
+    DRM_IOCTL_MODE_ADD_FB = 0xae,
+    DRM_IOCTL_MODE_CREATE_DUMB = 0xb2,
+    DRM_IOCTL_MODE_MAP_DUMB = 0xb3,
+    DRM_IOCTL_MODE_GET_CRTC = 0xa1,
+    DRM_IOCTL_MODE_SET_CRTC = 0xa2,
+};
+
+struct drm_mode_resources {
+    u32 *fbs;
+    u32 *crtcs;
+    u32 *connectors;
+    u32 *encoders;
+
+    u32 fbs_len;
+    u32 crtcs_len;
+    u32 connectors_len;
+    u32 encoders_len;
+
+    u32 min_width;
+    u32 max_width;
+    u32 min_height;
+    u32 max_height;
+};
+
+static struct drm_mode_resources *drm_mode_get_resources(
+    struct arena *arena,
+    i32 fd
+) {
+    struct drm_mode_resources prev_res;
+    struct drm_mode_resources *res;
+    struct arena temp_arena;
+    i32 error;
+
+    do {
+        temp_arena = *arena;
+        res = alloc(&temp_arena, sizeof(*res));
+        if (res == 0) {
+            return 0;
+        }
+        error = ioctl(
+            fd,
+            IOCTL_RDWR,
+            IOCTL_DRM,
+            DRM_IOCTL_MODE_GET_RESOURCES,
+            sizeof(*res),
+            (char *)res
+        );
+        if (error != 0) {
+            return 0;
+        }
+
+        prev_res = *res;
+
+        if (res->fbs_len > 0) {
+            res->fbs = alloc(&temp_arena, res->fbs_len * sizeof(*res->fbs));
+            if (res->fbs == 0) {
+                return 0;
+            }
+        }
+        if (res->crtcs_len > 0) {
+            res->crtcs = alloc(
+                &temp_arena,
+                res->crtcs_len * sizeof(*res->crtcs)
+            );
+            if (res->crtcs == 0) {
+                return 0;
+            }
+        }
+        if (res->connectors_len > 0) {
+            res->connectors = alloc(
+                &temp_arena,
+                res->connectors_len * sizeof(*res->connectors)
+            );
+            if (res->connectors == 0) {
+                return 0;
+            }
+        }
+        if (res->encoders_len > 0) {
+            res->encoders = alloc(
+                &temp_arena,
+                res->encoders_len * sizeof(*res->encoders)
+            );
+            if (res->encoders == 0) {
+                return 0;
+            }
+        }
+
+        error = ioctl(
+            fd,
+            IOCTL_RDWR,
+            IOCTL_DRM,
+            DRM_IOCTL_MODE_GET_RESOURCES,
+            sizeof(*res),
+            (char *)res
+        );
+        if (error != 0) {
+            return 0;
+        }
+    } while (
+        prev_res.fbs_len < res->fbs_len ||
+        prev_res.crtcs_len < res->crtcs_len ||
+        prev_res.connectors_len < res->connectors_len ||
+        prev_res.encoders_len < res->encoders_len
+    );
+
+    *arena = temp_arena;
+    return res;
+}
+
+enum drm_mode {
+    DRM_MODE_CONNECTED = 1,
+};
+
+struct drm_mode_modeinfo {
+    u32 clock;
+
+    u16 hdisplay;
+    u16 hsync_start;
+    u16 hsync_end;
+    u16 htotal;
+    u16 hskew;
+
+    u16 vdisplay;
+    u16 vsync_start;
+    u16 vsync_end;
+    u16 vtotal;
+    u16 vscan;
+
+    u32 vrefresh;
+
+    u32 flags;
+    u32 type;
+    char name[32];
+};
+
+struct drm_mode_connector {
+    u32 *encoders;
+    struct drm_mode_modeinfo *modes;
+    u32 *props;
+    u64 *prop_values;
+
+    u32 modes_len;
+    u32 props_len;
+    u32 encoders_len;
+
+    u32 encoder_id;
+    u32 connector_id;
+
+    u32 connector_type;
+    u32 connector_type_id;
+    u32 connection;
+    u32 mm_width;
+    u32 mm_height;
+    u32 subpixel;
+    u32 pad;
+};
+
+static struct drm_mode_connector *drm_mode_get_connector(
+    struct arena *arena,
+    i32 fd,
+    u32 connector_id
+) {
+    struct drm_mode_connector prev_conn;
+    struct drm_mode_connector *conn;
+    struct arena temp_arena;
+    i32 error;
+
+    do {
+        temp_arena = *arena;
+        conn = alloc(&temp_arena, sizeof(*conn));
+        if (conn == 0) {
+            return 0;
+        }
+        conn->connector_id = connector_id;
+        error = ioctl(
+            fd,
+            IOCTL_RDWR,
+            IOCTL_DRM,
+            DRM_IOCTL_MODE_GET_CONNECTOR,
+            sizeof(*conn),
+            (char *)conn
+        );
+        if (error != 0) {
+            return 0;
+        }
+
+        prev_conn = *conn;
+
+        if (conn->props_len > 0) {
+            conn->props = alloc(
+                &temp_arena,
+                conn->props_len * sizeof(*conn->props)
+            );
+            conn->prop_values = alloc(
+                &temp_arena,
+                conn->props_len * sizeof(*conn->prop_values)
+            );
+            if (conn->props == 0 || conn->prop_values == 0) {
+                return 0;
+            }
+        }
+        if (conn->modes_len > 0) {
+            conn->modes = alloc(
+                &temp_arena,
+                conn->modes_len * sizeof(*conn->modes)
+            );
+            if (conn->modes == 0) {
+                return 0;
+            }
+        }
+        if (conn->encoders_len > 0) {
+            conn->encoders = alloc(
+                &temp_arena,
+                conn->encoders_len * sizeof(*conn->encoders)
+            );
+            if (conn->encoders == 0) {
+                return 0;
+            }
+        }
+
+        error = ioctl(
+            fd,
+            IOCTL_RDWR,
+            IOCTL_DRM,
+            DRM_IOCTL_MODE_GET_CONNECTOR,
+            sizeof(*conn),
+            (char *)conn
+        );
+        if (error != 0) {
+            return 0;
+        }
+    } while (
+        prev_conn.props_len < conn->props_len ||
+        prev_conn.modes_len < conn->modes_len ||
+        prev_conn.encoders_len < conn->encoders_len
+    );
+
+    *arena = temp_arena;
+    return conn;
+}
+
+struct drm_mode_encoder {
+    u32 encoder_id;
+    u32 encoder_type;
+
+    u32 crtc_id;
+
+    u32 possible_crtcs;
+    u32 possible_clones;
+};
+
+static struct drm_mode_encoder *drm_mode_get_encoder(
+    struct arena *arena,
+    i32 fd,
+    u32 encoder_id
+) {
+    struct arena temp_arena = *arena;
+    struct drm_mode_encoder *enc = 0;
+
+    enc = alloc(&temp_arena, sizeof(*enc));
+    if (enc == 0) {
+        return 0;
+    }
+
+    enc->encoder_id = encoder_id;
+    i32 error = ioctl(
+        fd,
+        IOCTL_RDWR,
+        IOCTL_DRM,
+        DRM_IOCTL_MODE_GET_ENCODER,
+        sizeof(*enc),
+        (char *)enc
+    );
+    if (error != 0) {
+        return 0;
+    }
+
+    *arena = temp_arena;
+    return enc;
+}
+
+struct drm_mode_create_dumb {
+    u32 height;
+    u32 width;
+    u32 bpp;
+    u32 flags;
+    u32 handle;
+    u32 pitch;
+    u64 size;
+};
+
+struct drm_mode_map_dumb {
+    u32 handle;
+    u32 pad;
+    i64 offset;
+};
+
+struct drm_mode_fb_cmd {
+    u32 fb_id;
+    u32 width;
+    u32 height;
+    u32 pitch;
+    u32 bpp;
+    u32 depth;
+    u32 handle;
+};
+
+struct drm_mode_dumb_buffer {
+    u32 width;
+    u32 height;
+    u32 stride;
+    u32 handle;
+    u32 fb_id;
+    u32 *map;
+    u64 size;
+};
+
+static struct drm_mode_dumb_buffer *drm_mode_create_dumb_buffer(
+    struct arena *arena,
+    i32 fd,
+    u32 width,
+    u32 height
+) {
+    struct drm_mode_create_dumb creq = {
+        .width = width,
+        .height = height,
+        .bpp = 32,
+    };
+    i32 error = ioctl(
+        fd,
+        IOCTL_RDWR,
+        IOCTL_DRM,
+        DRM_IOCTL_MODE_CREATE_DUMB,
+        sizeof(creq),
+        (char *)&creq
+    );
+    if (error != 0) {
+        return 0;
+    }
+
+    struct drm_mode_fb_cmd fb_cmd = {
+        .width = width,
+        .height = height,
+        .pitch = creq.pitch,
+        .bpp = 32,
+        .depth = 24,
+        .handle = creq.handle,
+    };
+    error = ioctl(
+        fd,
+        IOCTL_RDWR,
+        IOCTL_DRM,
+        DRM_IOCTL_MODE_ADD_FB,
+        sizeof(fb_cmd),
+        (char *)&fb_cmd
+    );
+    if (error != 0) {
+        return 0;
+    }
+
+    struct drm_mode_map_dumb mreq = { .handle = creq.handle };
+    error = ioctl(
+        fd,
+        IOCTL_RDWR,
+        IOCTL_DRM,
+        DRM_IOCTL_MODE_MAP_DUMB,
+        sizeof(mreq),
+        (char *)&mreq
+    );
+    if (error != 0) {
+        return 0;
+    }
+
+    u32 *mem = mmap(
+        0,
+        (i64)creq.size,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        fd,
+        mreq.offset
+    );
+    if (mem == 0) {
+        return 0;
+    }
+
+    struct drm_mode_dumb_buffer *buf = alloc(arena, sizeof(*buf));
+    buf->width = width;
+    buf->height = height;
+    buf->stride = creq.pitch / sizeof(u32);
+    buf->size = creq.size / sizeof(u32);
+    buf->handle = creq.handle;
+    buf->map = mem;
+    buf->fb_id = fb_cmd.fb_id;
+
+    for (u64 i = 0; i < buf->size; ++i) {
+        buf->map[i] = 0;
+    }
+
+    return buf;
+}
+
+struct drm_mode_crtc {
+    u32 *set_connectors;
+    u32 connectors_len;
+
+    u32 crtc_id;
+    u32 fb_id;
+
+    u32 x;
+    u32 y;
+
+    u32 gamma_size;
+    u32 mode_valid;
+    struct drm_mode_modeinfo mode;
+};
+
+static struct drm_mode_crtc *drm_mode_get_crtc(
+    struct arena *arena,
+    i32 fd,
+    u32 crtc_id
+) {
+    struct arena temp_arena = *arena;
+    struct drm_mode_crtc *crtc = 0;
+
+    crtc = alloc(&temp_arena, sizeof(*crtc));
+    if (crtc == 0) {
+        return 0;
+    }
+
+    crtc->crtc_id = crtc_id;
+    i32 error = ioctl(
+        fd,
+        IOCTL_RDWR,
+        IOCTL_DRM,
+        DRM_IOCTL_MODE_GET_CRTC,
+        sizeof(*crtc),
+        (char *)crtc
+    );
+    if (error != 0) {
+        return 0;
+    }
+
+    *arena = temp_arena;
+    return crtc;
+}
+
+static i32 drm_mode_set_crtc(
+    i32 fd,
+    struct drm_mode_crtc *crtc,
+    u32 *connectors,
+    u32 connectors_len,
+    u32 fb_id
+) {
+    crtc->set_connectors = connectors;
+    crtc->connectors_len = connectors_len;
+    crtc->fb_id = fb_id;
+    return ioctl(
+        fd,
+        IOCTL_RDWR,
+        IOCTL_DRM,
+        DRM_IOCTL_MODE_SET_CRTC,
+        sizeof(*crtc),
+        (char *)crtc
+    );
+}
+
 enum main_error {
     MAIN_ERROR_NONE = 0,
     MAIN_ERROR_MMAP,
-    MAIN_ERROR_WRITE_STDOUT,
-    MAIN_ERROR_CLOCK_GETTIME,
-    MAIN_ERROR_POLL,
+    MAIN_ERROR_OPEN_CARD0,
+    MAIN_ERROR_DRM_GET_RESOURCES,
+    MAIN_ERROR_DRM_FIND_CONNECTOR,
+    MAIN_ERROR_DRM_GET_ENCODER,
+    MAIN_ERROR_DRM_CREATE_DUMB_BUFFER,
+    MAIN_ERROR_DRM_GET_CRTC,
+    MAIN_ERROR_DRM_SET_CRTC,
     MAIN_ERROR_OPEN_KEYBOARD,
     MAIN_ERROR_READ_KEYBOARD,
+    MAIN_ERROR_CLOCK_GETTIME,
+    MAIN_ERROR_POLL,
 };
 
 i32 main(i32 argc, char **argv) {
@@ -405,14 +882,78 @@ i32 main(i32 argc, char **argv) {
 
     struct arena arena = { .start = mem, .end = mem + arena_size };
 
-    char greeting[] = "Press ESC exit.\n";
-    i64 len = write(STDOUT, greeting, sizeof(greeting) - 1);
-    if (len < 0) {
-        return MAIN_ERROR_WRITE_STDOUT;
+    i32 card_fd = open("/dev/dri/card0", O_RDWR, 0);
+    if (card_fd < 0) {
+        return MAIN_ERROR_OPEN_CARD0;
+    }
+
+    struct drm_mode_resources *res = drm_mode_get_resources(&arena, card_fd);
+    if (res == 0) {
+        return MAIN_ERROR_DRM_GET_RESOURCES;
+    }
+
+    u32 conn_index;
+    struct drm_mode_connector *conn = 0;
+    for (conn_index = 0; conn_index < res->connectors_len; ++conn_index) {
+        conn = drm_mode_get_connector(
+            &arena,
+            card_fd,
+            res->connectors[conn_index]
+        );
+        if (conn == 0) {
+            continue;
+        }
+        if (conn->connection == DRM_MODE_CONNECTED && conn->modes_len != 0) {
+            break;
+        }
+    }
+    if (conn_index == res->connectors_len || conn == 0) {
+        return MAIN_ERROR_DRM_FIND_CONNECTOR;
+    }
+
+    struct drm_mode_encoder *enc = drm_mode_get_encoder(
+        &arena,
+        card_fd,
+        conn->encoder_id
+    );
+    if (enc == 0) {
+        return MAIN_ERROR_DRM_GET_ENCODER;
+    }
+
+    struct drm_mode_dumb_buffer *buf = drm_mode_create_dumb_buffer(
+        &arena,
+        card_fd,
+        conn->modes[0].hdisplay,
+        conn->modes[0].vdisplay
+    );
+    if (buf == 0) {
+        return MAIN_ERROR_DRM_CREATE_DUMB_BUFFER;
+    }
+
+    struct drm_mode_crtc *crtc = drm_mode_get_crtc(
+        &arena,
+        card_fd,
+        enc->crtc_id
+    );
+    if (crtc == 0) {
+        return MAIN_ERROR_DRM_GET_CRTC;
+    }
+
+    crtc->mode = conn->modes[0];
+
+    i32 error = drm_mode_set_crtc(
+        card_fd,
+        crtc,
+        &conn->connector_id,
+        1,
+        buf->fb_id
+    );
+    if (error != 0) {
+        return MAIN_ERROR_DRM_SET_CRTC;
     }
 
     struct timespec last, now;
-    i32 error = clock_gettime(CLOCK_MONOTONIC, &last);
+    error = clock_gettime(CLOCK_MONOTONIC, &last);
     if (error) {
         return MAIN_ERROR_CLOCK_GETTIME;
     }
@@ -434,6 +975,7 @@ i32 main(i32 argc, char **argv) {
         keyboard_pollfds[i].events = POLLIN;
     }
 
+    u32 color = 0;
     while (1) {
         i64 events = poll(keyboard_pollfds, keyboards_len, 0);
         if (events < 0) {
@@ -455,8 +997,8 @@ i32 main(i32 argc, char **argv) {
                 return MAIN_ERROR_READ_KEYBOARD;
             }
 
-            for (i32 i = 0; i < len / (i64)sizeof(*keyboard_events); ++i) {
-                struct input_event *keyboard_event = &keyboard_events[i];
+            for (i32 j = 0; j < len / (i64)sizeof(*keyboard_events); ++j) {
+                struct input_event *keyboard_event = &keyboard_events[j];
                 if (keyboard_event->type == 1 && keyboard_event->value == 1) {
                     switch (keyboard_event->code) {
                         case KEY_ESC:
@@ -468,17 +1010,17 @@ i32 main(i32 argc, char **argv) {
             }
         }
 
-        i32 error = clock_gettime(CLOCK_MONOTONIC, &now);
+        error = clock_gettime(CLOCK_MONOTONIC, &now);
         if (error) {
             return MAIN_ERROR_CLOCK_GETTIME;
         }
 
-        if (time_since_ns(&now, &last) >= 1000L * 1000L * 1000L) {
+        if (time_since_ns(&now, &last) >= 100L * 1000L * 1000L) {
             last = now;
 
-            len = write(STDOUT, ".", 1);
-            if (len < 0) {
-                return MAIN_ERROR_WRITE_STDOUT;
+            color += 5;
+            for (u32 i = 0; i < buf->size; ++i) {
+                buf->map[i] = color;
             }
         }
     }

@@ -32,3 +32,14 @@ src/runtime.o: src/runtime.s
 
 clean_runtime:
 	rm -f src/runtime.o
+
+
+test: dumb_cycle vm
+	cp dumb_cycle vm/fs/bin/dumb_cycle
+	cd vm; ./mkinitfs.sh
+	qemu-system-x86_64 -kernel vm/vmlinuz -initrd vm/initramfs -accel kvm \
+		-vga std -no-reboot & sleep 1 && vncviewer :5900
+
+vm:
+	curl -o vm.tar.gz https://musing.permutationlock.com/static/vm.tar.gz
+	tar -xvf vm.tar.gz
