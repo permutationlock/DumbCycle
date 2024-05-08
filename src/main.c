@@ -18,6 +18,7 @@ enum syscall {
     SYS_WRITE = 1,
     SYS_OPEN = 2,
     SYS_CLOSE = 3,
+    SYS_POLL = 7,
     SYS_EXIT = 60,
     SYS_CLOCK_GETTIME = 228,
 };
@@ -89,6 +90,29 @@ static i32 close(i32 fd) {
     return error;
 }
 
+enum poll_event {
+    POLLIN = 1,
+};
+
+struct pollfd {
+    i32 fd;
+    i16 events;
+    i16 revents;
+};
+
+static i32 poll(struct pollfd *fds, i64 fds_len, i32 time_ms) {
+    u64 return_value;
+    i32 error;
+    do {
+        return_value = syscall3(SYS_POLL, (u64)fds, (u64)fds_len, (u64)time_ms);
+        error = syscall_error(return_value);
+    } while (error == EINTR);
+    if (error != 0) {
+        return -error;
+    }
+    return (i32)return_value;
+}
+
 static void exit(i32 error_code) {
     syscall1(SYS_EXIT, (u64)error_code);
 }
@@ -126,18 +150,37 @@ enum main_error {
     MAIN_ERROR_NONE = 0,
     MAIN_ERROR_WRITE_STDOUT,
     MAIN_ERROR_CLOCK_GETTIME,
+    MAIN_ERROR_POLL,
 };
 
 i32 main(i32 argc, char **argv) {
+    char greeting[] = "Enter a message to exit.\n";
+    i64 len = write(STDOUT, greeting, sizeof(greeting) - 1);
+    if (len < 0) {
+        return MAIN_ERROR_WRITE_STDOUT;
+    }
+
     struct timespec last, now;
     i32 error = clock_gettime(CLOCK_MONOTONIC, &last);
     if (error) {
         return MAIN_ERROR_CLOCK_GETTIME;
     }
 
-    i64 len;
+    struct pollfd stdin_pollfd = { .fd = STDIN, .events = POLLIN, };
+
     i32 steps = 0;
-    while (steps < 5) {
+    while (1) {
+        i64 events = poll(&stdin_pollfd, 1, 0);
+        if (events < 0) {
+            return MAIN_ERROR_POLL;
+        }
+
+        if (events > 0) {
+            char dummy_buffer[255];
+            read(STDIN, dummy_buffer, sizeof(dummy_buffer));
+            break;
+        }
+
         i32 error = clock_gettime(CLOCK_MONOTONIC, &now);
         if (error) {
             return MAIN_ERROR_CLOCK_GETTIME;
@@ -152,11 +195,6 @@ i32 main(i32 argc, char **argv) {
                 return MAIN_ERROR_WRITE_STDOUT;
             }
         }
-    }
-
-    len = write(STDOUT, "\n", 1);
-    if (len < 0) {
-        return MAIN_ERROR_WRITE_STDOUT;
     }
 
     return MAIN_ERROR_NONE;
