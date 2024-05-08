@@ -19,6 +19,7 @@ enum syscall {
     SYS_OPEN = 2,
     SYS_CLOSE = 3,
     SYS_POLL = 7,
+    SYS_MMAP = 9,
     SYS_EXIT = 60,
     SYS_CLOCK_GETTIME = 228,
 };
@@ -113,6 +114,40 @@ static i32 poll(struct pollfd *fds, i64 fds_len, i32 time_ms) {
     return (i32)return_value;
 }
 
+enum mmap_prot {
+    PROT_READ = 1,
+    PROT_WRITE = 2,
+};
+
+enum mmap_flag {
+    MAP_SHARED = 0x01,
+    MAP_ANONYMOUS = 0x20,
+};
+
+static void *mmap(
+    void *hint,
+    i64 size,
+    i32 prot,
+    i32 flags,
+    i32 fd,
+    i64 offset
+) {
+    u64 return_value = syscall6(
+        SYS_MMAP,
+        (u64)hint,
+        (u64)size,
+        (u64)prot,
+        (u64)flags,
+        (u64)fd,
+        (u64)offset
+    );
+    i32 error = syscall_error(return_value);
+    if (error != 0) {
+        return 0;
+    }
+    return (void *)return_value;
+}
+
 static void exit(i32 error_code) {
     syscall1(SYS_EXIT, (u64)error_code);
 }
@@ -146,56 +181,35 @@ enum std_fd {
     STDERR = 2,
 };
 
+struct arena {
+    char *start;
+    char *end;
+};
+
+void *alloc(struct arena *arena, i64 size);
+
 enum main_error {
     MAIN_ERROR_NONE = 0,
-    MAIN_ERROR_WRITE_STDOUT,
-    MAIN_ERROR_CLOCK_GETTIME,
-    MAIN_ERROR_POLL,
+    MAIN_ERROR_MMAP,
 };
 
 i32 main(i32 argc, char **argv) {
-    char greeting[] = "Enter a message to exit.\n";
-    i64 len = write(STDOUT, greeting, sizeof(greeting) - 1);
-    if (len < 0) {
-        return MAIN_ERROR_WRITE_STDOUT;
+    i64 arena_size = 2000 * 4096;
+    char *mem = mmap(
+        0,
+        arena_size,
+        PROT_WRITE | PROT_READ,
+        MAP_SHARED | MAP_ANONYMOUS,
+        -1,
+        0
+    );
+    if (mem == 0) {
+        return MAIN_ERROR_MMAP;
     }
 
-    struct timespec last, now;
-    i32 error = clock_gettime(CLOCK_MONOTONIC, &last);
-    if (error) {
-        return MAIN_ERROR_CLOCK_GETTIME;
-    }
-
-    struct pollfd stdin_pollfd = { .fd = STDIN, .events = POLLIN, };
-
-    i32 steps = 0;
-    while (1) {
-        i64 events = poll(&stdin_pollfd, 1, 0);
-        if (events < 0) {
-            return MAIN_ERROR_POLL;
-        }
-
-        if (events > 0) {
-            char dummy_buffer[255];
-            read(STDIN, dummy_buffer, sizeof(dummy_buffer));
-            break;
-        }
-
-        i32 error = clock_gettime(CLOCK_MONOTONIC, &now);
-        if (error) {
-            return MAIN_ERROR_CLOCK_GETTIME;
-        }
-
-        if (time_since_ns(&now, &last) >= 1000L * 1000L * 1000L) {
-            last = now;
-            steps += 1;
-
-            len = write(STDOUT, ".", 1);
-            if (len < 0) {
-                return MAIN_ERROR_WRITE_STDOUT;
-            }
-        }
-    }
+    struct arena arena = { .start = mem, .end = mem + arena_size };
+    char *buf = 0;
+    i64 buf_len = 0;
 
     return MAIN_ERROR_NONE;
 }
