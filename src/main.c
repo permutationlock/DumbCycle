@@ -984,13 +984,21 @@ i32 main(i32 argc, char **argv) {
         return MAIN_ERROR_DRM_GET_ENCODER;
     }
 
-    struct drm_mode_dumb_buffer *buf = drm_mode_create_dumb_buffer(
+    u32 buf_index = 0;
+    struct drm_mode_dumb_buffer *bufs[2];
+    bufs[0] = drm_mode_create_dumb_buffer(
         &arena,
         card_fd,
         conn->modes[0].hdisplay,
         conn->modes[0].vdisplay
     );
-    if (buf == 0) {
+    bufs[1] = drm_mode_create_dumb_buffer(
+        &arena,
+        card_fd,
+        conn->modes[0].hdisplay,
+        conn->modes[0].vdisplay
+    );
+    if (bufs[0] == 0 || bufs[1] == 0) {
         return MAIN_ERROR_DRM_CREATE_DUMB_BUFFER;
     }
 
@@ -1010,11 +1018,12 @@ i32 main(i32 argc, char **argv) {
         crtc,
         &conn->connector_id,
         1,
-        buf->fb_id
+        bufs[buf_index]->fb_id
     );
     if (error != 0) {
         return MAIN_ERROR_DRM_SET_CRTC;
     }
+    buf_index ^= 1;
 
     struct timespec last, now;
     error = clock_gettime(CLOCK_MONOTONIC, &last);
@@ -1039,8 +1048,8 @@ i32 main(i32 argc, char **argv) {
         keyboard_pollfds[i].events = POLLIN;
     }
 
-    u32 width = buf->width;
-    u32 height = buf->height;
+    u32 width = bufs[0]->width;
+    u32 height = bufs[0]->height;
     u32 square_len = (height > width) ? width : height;
     u32 scale = square_len / 90;
     u32 board_size = square_len - (square_len % 90);
@@ -1115,11 +1124,23 @@ i32 main(i32 argc, char **argv) {
         if (time_since_ns(&now, &last) >= 33L * 1000L * 1000L) {
             last = now;
             update_game(&game_state);
-            draw_game(buf, &game_state, board_x, board_y, scale);
+            draw_game(bufs[buf_index], &game_state, board_x, board_y, scale);
 
             if (game_state.dead) {
                 clear_game(&game_state);
             }
+
+            error = drm_mode_set_crtc(
+                card_fd,
+                crtc,
+                &conn->connector_id,
+                1,
+                bufs[buf_index]->fb_id
+            );
+            if (error != 0) {
+                return MAIN_ERROR_DRM_SET_CRTC;
+            }
+            buf_index ^= 1;
         }
     }
 
