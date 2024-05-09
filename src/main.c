@@ -850,6 +850,70 @@ static i32 drm_mode_set_crtc(
     );
 }
 
+enum color {
+    COLOR_BLUE = 0x0000ff,
+    COLOR_GRAY = 0xededed
+};
+
+struct game_state {
+    i32 x;
+    i32 y;
+    i32 vx;
+    i32 vy;
+    i32 dead;
+    char board[90 * 90];
+};
+
+static void clear_game(struct game_state *state) {
+    state->x = 45;
+    state->y = 45;
+    state->vx = 1;
+    state->vy = 0;
+    state->dead = 0;
+
+    for (i32 i = 0; i < sizeof(state->board); ++i) {
+        state->board[i] = 0;
+    }
+}
+
+static void update_game(struct game_state *state) {
+    state->board[state->y * 90 + state->x] = 1;
+    state->y += state->vy;
+    state->x += state->vx;
+
+    if (state->board[state->y * 90 + state->x] != 0 || state->x == 89 ||
+        state->x == 0 || state->y == 89 || state->y == 0) {
+        state->dead = 1;
+    }
+
+    state->board[state->y * 90 + state->x] = 1;
+}
+
+static void draw_game(
+    struct drm_mode_dumb_buffer *buf,
+    struct game_state *state,
+    u32 x,
+    u32 y,
+    u32 scale
+) {
+    for (u32 i = 0; i < 90; ++i) {
+        for (u32 yoff = 0; yoff < scale; ++yoff) {
+            u32 cy = cy = y + i * scale + yoff;
+            for (u32 j = 0; j < 90; ++j) {
+                for (u32 xoff = 0; xoff < scale; ++xoff) {
+                    u32 cx = x + j * scale + xoff;
+                    u32 pixel_index = cy * buf->stride + cx;
+                    if (state->board[i * 90 + j] == 0) {
+                        buf->map[pixel_index] = (u32)COLOR_GRAY;
+                    } else {
+                        buf->map[pixel_index] = (u32)COLOR_BLUE;
+                    }
+                }
+            }
+        }
+    }
+}
+
 enum main_error {
     MAIN_ERROR_NONE = 0,
     MAIN_ERROR_MMAP,
@@ -975,17 +1039,24 @@ i32 main(i32 argc, char **argv) {
         keyboard_pollfds[i].events = POLLIN;
     }
 
-    u32 color = 0;
-    while (1) {
-        i64 events = poll(keyboard_pollfds, keyboards_len, 0);
-        if (events < 0) {
-            return MAIN_ERROR_POLL;
-        }
+    u32 width = buf->width;
+    u32 height = buf->height;
+    u32 square_len = (height > width) ? width : height;
+    u32 scale = square_len / 90;
+    u32 board_size = square_len - (square_len % 90);
+    u32 board_x = (width / 2) - (board_size / 2);
+    u32 board_y = (height / 2) - (board_size / 2);
 
+    struct game_state game_state;
+    clear_game(&game_state);
+
+    while (1) {
+        poll(keyboard_pollfds, keyboards_len, 0);
         for (i32 i = 0; i < keyboards_len; ++i) {
             if (keyboard_pollfds[i].revents == 0) {
                 continue;
             }
+
             i32 keyboard_fd = keyboard_pollfds[i].fd;
 
             i64 len = read(
@@ -999,28 +1070,55 @@ i32 main(i32 argc, char **argv) {
 
             for (i32 j = 0; j < len / (i64)sizeof(*keyboard_events); ++j) {
                 struct input_event *keyboard_event = &keyboard_events[j];
-                if (keyboard_event->type == 1 && keyboard_event->value == 1) {
-                    switch (keyboard_event->code) {
-                        case KEY_ESC:
-                            return MAIN_ERROR_NONE;
-                        default:
-                            continue;
-                    }
+                if (keyboard_event->type != 1 || keyboard_event->value != 1) {
+                    continue;
+                }
+
+                switch (keyboard_event->code) {
+                    case KEY_ESC:
+                        return MAIN_ERROR_NONE;
+                    case KEY_A:
+                        if (game_state.vx <= 0) {
+                            game_state.vx = -1;
+                            game_state.vy = 0;
+                        }
+                        break;
+                    case KEY_D:
+                        if (game_state.vx >= 0) {
+                            game_state.vx = 1;
+                            game_state.vy = 0;
+                        }
+                        break;
+                    case KEY_W:
+                        if (game_state.vy <= 0) {
+                            game_state.vx = 0;
+                            game_state.vy = -1;
+                        }
+                        break;
+                    case KEY_S:
+                        if (game_state.vy >= 0) {
+                            game_state.vx = 0;
+                            game_state.vy = 1;
+                        }
+                        break;
+                    default:
+                        continue;
                 }
             }
         }
 
         error = clock_gettime(CLOCK_MONOTONIC, &now);
-        if (error) {
+        if (error !=0) {
             return MAIN_ERROR_CLOCK_GETTIME;
         }
 
-        if (time_since_ns(&now, &last) >= 100L * 1000L * 1000L) {
+        if (time_since_ns(&now, &last) >= 33L * 1000L * 1000L) {
             last = now;
+            update_game(&game_state);
+            draw_game(buf, &game_state, board_x, board_y, scale);
 
-            color += 5;
-            for (u32 i = 0; i < buf->size; ++i) {
-                buf->map[i] = color;
+            if (game_state.dead) {
+                clear_game(&game_state);
             }
         }
     }
