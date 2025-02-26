@@ -13,6 +13,25 @@ u64 syscall4(u64 scid, u64 a1, u64 a2, u64 a3, u64 a4);
 u64 syscall5(u64 scid, u64 a1, u64 a2, u64 a3, u64 a4, u64 a5);
 u64 syscall6(u64 scid, u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6);
 
+void *memcpy(void *restrict dst, const void *restrict src, u64 len) {
+    const char *src_bytes = src;
+    char *dst_bytes = dst;
+    for (u64 i = 0; i < len; i += 1) {
+        dst_bytes[i] = src_bytes[i];
+    }
+
+    return dst;
+}
+
+void *memset(void *mem, int val, u64 len) {
+    char *mem_bytes = mem;
+    for (u64 i = 0; i < len; i += 1) {
+        mem_bytes[i] = val;
+    }
+
+    return mem;
+}
+
 enum syscall {
     SYS_READ = 0,
     SYS_WRITE = 1,
