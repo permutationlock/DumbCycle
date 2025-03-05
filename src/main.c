@@ -408,6 +408,7 @@ enum drm_ioctl {
     DRM_IOCTL_MODE_MAP_DUMB = 0xb3,
     DRM_IOCTL_MODE_GET_CRTC = 0xa1,
     DRM_IOCTL_MODE_SET_CRTC = 0xa2,
+    DRM_IOCTL_MODE_PAGE_FLIP = 0xb0,
 };
 
 struct drm_mode_resources {
@@ -869,6 +870,70 @@ static i32 drm_mode_set_crtc(
     );
 }
 
+struct drm_mode_crtc_page_flip {
+    u32 crtc_id;
+    u32 fb_id;
+    u32 flags;
+    u32 reserved;
+    void *user_data;
+};
+
+enum drm_mode_page_flip {
+    DRM_MODE_PAGE_FLIP_EVENT = 1,
+};
+
+static i32 drm_mode_crtc_page_flip(
+    i32 fd,
+    u32 crtc_id,
+    u32 fb_id
+) {
+    struct drm_mode_crtc_page_flip flip = {
+        .crtc_id = crtc_id,
+        .fb_id = fb_id,
+        .flags = DRM_MODE_PAGE_FLIP_EVENT,
+        .user_data = (void *)0,
+    };
+
+    return ioctl(
+        fd,
+        IOCTL_RDWR,
+        IOCTL_DRM,
+        DRM_IOCTL_MODE_PAGE_FLIP,
+        sizeof(flip),
+        (char *)&flip
+    );
+}
+
+struct drm_event {
+    u32 type;
+    u32 length;
+};
+
+enum drm_event_type {
+    DRM_EVENT_TYPE_FLIP_COMPLETE = 2,
+};
+
+static i32 drm_mode_handle_events(i32 fd, struct arena temp_arena) {
+    i32 flip_complete = 0;
+
+    char *buffer = alloc(&temp_arena, 4096);
+    i64 len = read(fd, buffer, 4096);
+    if (len < 0) {
+        return (i32)len;
+    }
+
+    i64 i = 0;
+    while (i < len) {
+        struct drm_event *e = (struct drm_event *)(buffer + i);
+        if (e->type == DRM_EVENT_TYPE_FLIP_COMPLETE) {
+            flip_complete = 1;
+        }
+        i += e->length;
+    }
+
+    return flip_complete;
+}
+
 enum color {
     COLOR_BLUE = 0x0000ff,
     COLOR_GRAY = 0xededed
@@ -879,33 +944,40 @@ struct game_state {
     i32 y;
     i32 vx;
     i32 vy;
+    i32 nvx;
+    i32 nvy;
     i32 dead;
     char board[90 * 90];
 };
 
 static void clear_game(struct game_state *state) {
-    state->x = 45;
+    state->x = 15;
     state->y = 45;
     state->vx = 1;
     state->vy = 0;
+    state->nvx = state->vx;
+    state->nvy = state->vy;
     state->dead = 0;
 
     for (i32 i = 0; i < sizeof(state->board); ++i) {
         state->board[i] = 0;
     }
+
+    state->board[state->y * 90 + state->x] = 1;
 }
 
 static void update_game(struct game_state *state) {
-    state->board[state->y * 90 + state->x] = 1;
     state->y += state->vy;
     state->x += state->vx;
+    state->vx = state->nvx;
+    state->vy = state->nvy;
 
-    if (state->board[state->y * 90 + state->x] != 0 || state->x == 89 ||
-        state->x == 0 || state->y == 89 || state->y == 0) {
+    if (state->board[state->y * 90 + state->x] != 0 || state->x > 89 ||
+        state->x < 0 || state->y > 89 || state->y < 0) {
         state->dead = 1;
+    } else {
+        state->board[state->y * 90 + state->x] = 1;
     }
-
-    state->board[state->y * 90 + state->x] = 1;
 }
 
 static void draw_game(
@@ -933,6 +1005,48 @@ static void draw_game(
     }
 }
 
+static void draw_partial(
+    struct drm_mode_dumb_buffer *buf,
+    struct game_state *state,
+    u32 x,
+    u32 y,
+    u32 scale,
+    u32 partial
+) {
+    if (state->y == 0 && state->vy < 0) {
+        return;
+    }
+    if (state->y == 89 && state->vy > 0) {
+        return;
+    }
+    if (state->x == 0 && state->vx < 0) {
+        return;
+    }
+    if (state->x == 89 && state->vx > 0) {
+        return;
+    }
+    for (u32 yoff = 0; yoff < scale; ++yoff) {
+        if (state->vy > 0 && yoff >= partial) {
+            continue;
+        }
+        if (state->vy < 0 && yoff < scale - partial) {
+            continue;
+        }
+        u32 cy = cy = y + (state->y + state->vy) * scale + yoff;
+        for (u32 xoff = 0; xoff < scale; ++xoff) {
+            if (state->vx > 0 && xoff >= partial) {
+                continue;
+            }
+            if (state->vx < 0 && xoff < scale - partial) {
+                continue;
+            }
+            u32 cx = x + (state->x + state->vx) * scale + xoff;
+            u32 pixel_index = cy * buf->stride + cx;
+            buf->map[pixel_index] = (u32)COLOR_BLUE;
+        }
+    }
+}
+
 enum main_error {
     MAIN_ERROR_NONE = 0,
     MAIN_ERROR_MMAP,
@@ -943,6 +1057,8 @@ enum main_error {
     MAIN_ERROR_DRM_CREATE_DUMB_BUFFER,
     MAIN_ERROR_DRM_GET_CRTC,
     MAIN_ERROR_DRM_SET_CRTC,
+    MAIN_ERROR_DRM_HANDLE_EVENTS,
+    MAIN_ERROR_DRM_PAGE_FLIP,
     MAIN_ERROR_OPEN_KEYBOARD,
     MAIN_ERROR_READ_KEYBOARD,
     MAIN_ERROR_CLOCK_GETTIME,
@@ -1044,6 +1160,29 @@ i32 main(i32 argc, char **argv) {
     }
     buf_index ^= 1;
 
+    error = drm_mode_set_crtc(
+        card_fd,
+        crtc,
+        &conn->connector_id,
+        1,
+        bufs[buf_index]->fb_id
+    );
+    if (error != 0) {
+        return MAIN_ERROR_DRM_SET_CRTC;
+    }
+    buf_index ^= 1;
+
+    error = drm_mode_crtc_page_flip(
+        card_fd,
+        crtc->crtc_id,
+        bufs[buf_index]->fb_id
+    );
+    if (error != 0) {
+        return MAIN_ERROR_DRM_PAGE_FLIP;
+    }
+    buf_index ^= 1;
+
+    i64 elapsed = 0;
     struct timespec last, now;
     error = clock_gettime(CLOCK_MONOTONIC, &last);
     if (error) {
@@ -1061,11 +1200,13 @@ i32 main(i32 argc, char **argv) {
     }
 
     struct input_event keyboard_events[32];
-    struct pollfd keyboard_pollfds[32];
+    struct pollfd pollfds[32 + 1];
     for (i32 i = 0; i < keyboards_len; ++i) {
-        keyboard_pollfds[i].fd = keyboards[i];
-        keyboard_pollfds[i].events = POLLIN;
+        pollfds[i].fd = keyboards[i];
+        pollfds[i].events = POLLIN;
     }
+    pollfds[keyboards_len].fd = card_fd;
+    pollfds[keyboards_len].events = POLLIN;
 
     u32 width = bufs[0]->width;
     u32 height = bufs[0]->height;
@@ -1079,13 +1220,20 @@ i32 main(i32 argc, char **argv) {
     clear_game(&game_state);
 
     while (1) {
-        poll(keyboard_pollfds, keyboards_len, 0);
+        error = clock_gettime(CLOCK_MONOTONIC, &now);
+        if (error !=0) {
+            return MAIN_ERROR_CLOCK_GETTIME;
+        }
+        elapsed += time_since_ns(&now, &last);
+        last = now;
+
+        poll(pollfds, keyboards_len + 1, 0);
         for (i32 i = 0; i < keyboards_len; ++i) {
-            if (keyboard_pollfds[i].revents == 0) {
+            if (pollfds[i].revents == 0) {
                 continue;
             }
 
-            i32 keyboard_fd = keyboard_pollfds[i].fd;
+            i32 keyboard_fd = pollfds[i].fd;
 
             i64 len = read(
                 keyboard_fd,
@@ -1107,26 +1255,26 @@ i32 main(i32 argc, char **argv) {
                         return MAIN_ERROR_NONE;
                     case KEY_A:
                         if (game_state.vx <= 0) {
-                            game_state.vx = -1;
-                            game_state.vy = 0;
+                            game_state.nvx = -1;
+                            game_state.nvy = 0;
                         }
                         break;
                     case KEY_D:
                         if (game_state.vx >= 0) {
-                            game_state.vx = 1;
-                            game_state.vy = 0;
+                            game_state.nvx = 1;
+                            game_state.nvy = 0;
                         }
                         break;
                     case KEY_W:
                         if (game_state.vy <= 0) {
-                            game_state.vx = 0;
-                            game_state.vy = -1;
+                            game_state.nvx = 0;
+                            game_state.nvy = -1;
                         }
                         break;
                     case KEY_S:
                         if (game_state.vy >= 0) {
-                            game_state.vx = 0;
-                            game_state.vy = 1;
+                            game_state.nvx = 0;
+                            game_state.nvy = 1;
                         }
                         break;
                     default:
@@ -1135,31 +1283,41 @@ i32 main(i32 argc, char **argv) {
             }
         }
 
-        error = clock_gettime(CLOCK_MONOTONIC, &now);
-        if (error !=0) {
-            return MAIN_ERROR_CLOCK_GETTIME;
-        }
-
-        if (time_since_ns(&now, &last) >= 33L * 1000L * 1000L) {
-            last = now;
+        const i64 timestep = 24L * 1000L * 1000L;
+        while (elapsed >= timestep) {
+            elapsed -= timestep;
             update_game(&game_state);
-            draw_game(bufs[buf_index], &game_state, board_x, board_y, scale);
 
             if (game_state.dead) {
                 clear_game(&game_state);
             }
+        }
 
-            error = drm_mode_set_crtc(
-                card_fd,
-                crtc,
-                &conn->connector_id,
-                1,
-                bufs[buf_index]->fb_id
-            );
-            if (error != 0) {
-                return MAIN_ERROR_DRM_SET_CRTC;
+        if (pollfds[keyboards_len].revents != 0) {
+            i32 result = drm_mode_handle_events(card_fd, arena);
+            if (result < 0) {
+                return MAIN_ERROR_DRM_HANDLE_EVENTS;
             }
-            buf_index ^= 1;
+            if (result > 0) {
+                draw_game(bufs[buf_index], &game_state, board_x, board_y, scale);
+                draw_partial(
+                    bufs[buf_index],
+                    &game_state,
+                    board_x,
+                    board_y,
+                    scale,
+                    (i32)((elapsed * (i64)scale) / timestep)
+                );
+                error = drm_mode_crtc_page_flip(
+                    card_fd,
+                    crtc->crtc_id,
+                    bufs[buf_index]->fb_id
+                );
+                if (error != 0) {
+                    return MAIN_ERROR_DRM_PAGE_FLIP;
+                }
+                buf_index ^= 1;
+            }
         }
     }
 
