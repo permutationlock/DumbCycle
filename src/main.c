@@ -946,7 +946,11 @@ struct game_state {
     i32 vy;
     i32 nvx;
     i32 nvy;
+    i32 nnvx;
+    i32 nnvy;
     i32 dead;
+    i64 steps;
+    i64 timestep;
     char board[90 * 90];
 };
 
@@ -957,7 +961,12 @@ static void clear_game(struct game_state *state) {
     state->vy = 0;
     state->nvx = state->vx;
     state->nvy = state->vy;
+    state->nnvx = state->vx;
+    state->nnvy = state->vy;
     state->dead = 0;
+
+    state->timestep = 66L * 1000L * 1000L;
+    state->steps = 0;
 
     for (i32 i = 0; i < sizeof(state->board); ++i) {
         state->board[i] = 0;
@@ -971,12 +980,22 @@ static void update_game(struct game_state *state) {
     state->x += state->vx;
     state->vx = state->nvx;
     state->vy = state->nvy;
+    state->nvx = state->nnvx;
+    state->nvy = state->nnvy;
 
     if (state->board[state->y * 90 + state->x] != 0 || state->x > 89 ||
         state->x < 0 || state->y > 89 || state->y < 0) {
         state->dead = 1;
     } else {
         state->board[state->y * 90 + state->x] = 1;
+    }
+
+    state->steps += 1;
+    if (state->steps >= (1000L * 1000L * 1000L) / state->timestep) {
+        if (state->timestep > 16L * 1000L * 1000L) {
+            state->timestep -= 2L * 1000L * 1000L;
+        }
+        state->steps = 0;
     }
 }
 
@@ -1254,27 +1273,75 @@ i32 main(i32 argc, char **argv) {
                     case KEY_ESC:
                         return MAIN_ERROR_NONE;
                     case KEY_A:
-                        if (game_state.vx <= 0) {
-                            game_state.nvx = -1;
-                            game_state.nvy = 0;
+                        if (
+                            game_state.nvx == game_state.vx &&
+                            game_state.nvy == game_state.vy
+                        ) {
+                            if (game_state.vx <= 0) {
+                                game_state.nvx = -1;
+                                game_state.nvy = 0;
+                                game_state.nnvx = -1;
+                                game_state.nnvy = 0;
+                            }
+                        } else {
+                            if (game_state.nvx <= 0) {
+                                game_state.nnvx = -1;
+                                game_state.nnvy = 0;
+                            }
                         }
                         break;
                     case KEY_D:
-                        if (game_state.vx >= 0) {
-                            game_state.nvx = 1;
-                            game_state.nvy = 0;
+                        if (
+                            game_state.nvx == game_state.vx &&
+                            game_state.nvy == game_state.vy
+                        ) {
+                            if (game_state.vx >= 0) {
+                                game_state.nvx = 1;
+                                game_state.nvy = 0;
+                                game_state.nnvx = 1;
+                                game_state.nnvy = 0;
+                            }
+                        } else {
+                            if (game_state.nvx >= 0) {
+                                game_state.nnvx = 1;
+                                game_state.nnvy = 0;
+                            }
                         }
                         break;
                     case KEY_W:
-                        if (game_state.vy <= 0) {
-                            game_state.nvx = 0;
-                            game_state.nvy = -1;
+                        if (
+                            game_state.nvx == game_state.vx &&
+                            game_state.nvy == game_state.vy
+                        ) {
+                            if (game_state.vy <= 0) {
+                                game_state.nvx = 0;
+                                game_state.nvy = -1;
+                                game_state.nnvx = 0;
+                                game_state.nnvy = -1;
+                            }
+                        } else {
+                            if (game_state.nvy <= 0) {
+                                game_state.nnvx = 0;
+                                game_state.nnvy = -1;
+                            }
                         }
                         break;
                     case KEY_S:
-                        if (game_state.vy >= 0) {
-                            game_state.nvx = 0;
-                            game_state.nvy = 1;
+                        if (
+                            game_state.nvx == game_state.vx &&
+                            game_state.nvy == game_state.vy
+                        ) {
+                            if (game_state.vy >= 0) {
+                                game_state.nvx = 0;
+                                game_state.nvy = 1;
+                                game_state.nnvx = 0;
+                                game_state.nnvy = 1;
+                            }
+                        } else {
+                            if (game_state.nvy >= 0) {
+                                game_state.nnvx = 0;
+                                game_state.nnvy = 1;
+                            }
                         }
                         break;
                     default:
@@ -1283,9 +1350,8 @@ i32 main(i32 argc, char **argv) {
             }
         }
 
-        const i64 timestep = 24L * 1000L * 1000L;
-        while (elapsed >= timestep) {
-            elapsed -= timestep;
+        while (elapsed >= game_state.timestep) {
+            elapsed -= game_state.timestep;
             update_game(&game_state);
 
             if (game_state.dead) {
@@ -1306,7 +1372,7 @@ i32 main(i32 argc, char **argv) {
                     board_x,
                     board_y,
                     scale,
-                    (i32)((elapsed * (i64)scale) / timestep)
+                    (i32)((elapsed * (i64)scale) / game_state.timestep)
                 );
                 error = drm_mode_crtc_page_flip(
                     card_fd,
