@@ -145,14 +145,7 @@ enum mmap_flag {
     MAP_ANONYMOUS = 0x20,
 };
 
-static void *mmap(
-    void *hint,
-    i64 size,
-    i32 prot,
-    i32 flags,
-    i32 fd,
-    i64 offset
-) {
+static void *mmap(void *hint, i64 size, i32 prot, i32 flags, i32 fd, i64 offset) {
     u64 return_value = syscall6(
         SYS_MMAP,
         (u64)hint,
@@ -226,11 +219,7 @@ struct timespec {
 };
 
 static i32 clock_gettime(i32 clock_id, struct timespec *timespec) {
-    u64 return_value = syscall2(
-        SYS_CLOCK_GETTIME,
-        (u64)clock_id,
-        (u64)timespec
-    );
+    u64 return_value = syscall2(SYS_CLOCK_GETTIME, (u64)clock_id, (u64)timespec);
     return syscall_error(return_value);
 }
 
@@ -274,7 +263,7 @@ enum ev_key_bits {
     KEY_A = 30,
     KEY_S = 31,
     KEY_D = 32,
-    KEY_MAX = 0x2ff
+    KEY_MAX = 0x2ff,
 };
 
 static i32 test_bit(char *bytes, i32 len, i32 bit_num) {
@@ -317,7 +306,7 @@ static i32 is_keyboard(i32 fd) {
         return 0;
     }
     if (
-        test_bit(evio_key_bits, sizeof(evio_key_bits), KEY_ESC) &&    
+        test_bit(evio_key_bits, sizeof(evio_key_bits), KEY_ESC) &&
         test_bit(evio_key_bits, sizeof(evio_key_bits), KEY_W) &&
         test_bit(evio_key_bits, sizeof(evio_key_bits), KEY_A) &&
         test_bit(evio_key_bits, sizeof(evio_key_bits), KEY_S) &&
@@ -882,11 +871,7 @@ enum drm_mode_page_flip {
     DRM_MODE_PAGE_FLIP_EVENT = 1,
 };
 
-static i32 drm_mode_crtc_page_flip(
-    i32 fd,
-    u32 crtc_id,
-    u32 fb_id
-) {
+static i32 drm_mode_crtc_page_flip(i32 fd, u32 crtc_id, u32 fb_id) {
     struct drm_mode_crtc_page_flip flip = {
         .crtc_id = crtc_id,
         .fb_id = fb_id,
@@ -936,7 +921,7 @@ static i32 drm_mode_handle_events(i32 fd, struct arena temp_arena) {
 
 enum color {
     COLOR_BLUE = 0x0000ff,
-    COLOR_GRAY = 0xededed
+    COLOR_GRAY = 0xededed,
 };
 
 struct game_state {
@@ -983,8 +968,13 @@ static void update_game(struct game_state *state) {
     state->nvx = state->nnvx;
     state->nvy = state->nnvy;
 
-    if (state->board[state->y * 90 + state->x] != 0 || state->x > 89 ||
-        state->x < 0 || state->y > 89 || state->y < 0) {
+    if (
+        state->board[state->y * 90 + state->x] != 0 ||
+        state->x > 89 ||
+        state->x < 0 ||
+        state->y > 89 ||
+        state->y < 0
+    ) {
         state->dead = 1;
     } else {
         state->board[state->y * 90 + state->x] = 1;
@@ -1240,7 +1230,7 @@ i32 main(i32 argc, char **argv) {
 
     while (1) {
         error = clock_gettime(CLOCK_MONOTONIC, &now);
-        if (error !=0) {
+        if (error != 0) {
             return MAIN_ERROR_CLOCK_GETTIME;
         }
         elapsed += time_since_ns(&now, &last);
