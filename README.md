@@ -1,6 +1,6 @@
 # DumbCycle
 
-A commit-by-commit (hopefully) instructional example of how to make a game
+A commit-by-commit[^1] (hopefully) instructional example of how to make a game
 using the dumb frame buffer interface of the Linux Direct Rendering Manager.
 The entire game is ~1000 lines of
 C99 code with a small `x86_64` assembly runtime. No libraries or preprocessor
@@ -50,6 +50,10 @@ and toybox yourself a corresponding [`vm_src.tar.gz`][12] is provided.
  - [musl libc][1]
  - [libdrm][2]
  - [linux source][3]
+
+[^1]: I have since added a few commits and modified the article slightly, but in
+      general you should still be able to follow the article sections while stepping
+      through the commit history.
 
 [1]: https://musl.libc.org/
 [2]: https://gitlab.freedesktop.org/mesa/drm
