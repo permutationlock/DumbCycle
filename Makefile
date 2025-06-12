@@ -1,5 +1,8 @@
 CC ?= gcc
-CFLAGS ?= -fno-stack-protector
+CFLAGS ?= -fno-stack-protector -std=c99 -pedantic \
+	-fsanitize-trap -fsanitize=undefined,unreachable \
+	-Wall -Wextra -Wshadow -Wconversion -Wdouble-promotion -Winit-self \
+	-Wcast-align -Wstrict-prototypes -Wold-style-definition
 LD ?= ld
 LDFLAGS ?=
 AS ?= as

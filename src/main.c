@@ -26,7 +26,7 @@ void *memcpy(void *restrict dst, const void *restrict src, u64 len) {
 void *memset(void *mem, int val, u64 len) {
     char *mem_bytes = mem;
     for (u64 i = 0; i < len; i += 1) {
-        mem_bytes[i] = val;
+        mem_bytes[i] = (char)val;
     }
 
     return mem;
@@ -61,19 +61,6 @@ static i64 read(i32 fd, char *bytes, i64 bytes_len) {
     i32 error;
     do {
         return_value = syscall3(SYS_READ, (u64)fd, (u64)bytes, (u64)bytes_len);
-        error = syscall_error(return_value);
-    } while (error == EINTR);
-    if (error != 0) {
-        return -error;
-    }
-    return (i64)return_value;
-}
-
-static i64 write(i32 fd, char *bytes, i64 bytes_len) {
-    u64 return_value;
-    i32 error;
-    do {
-        return_value = syscall3(SYS_WRITE, (u64)fd, (u64)bytes, (u64)bytes_len);
         error = syscall_error(return_value);
     } while (error == EINTR);
     if (error != 0) {
@@ -330,7 +317,7 @@ static i32 open_keyboards(
 
     void *dents = alloc(&temp_arena, 1024);
     char path_buffer[sizeof(input_dir) + 1024];
-    for (i32 i = 0; i < sizeof(input_dir); ++i) {
+    for (u64 i = 0; i < sizeof(input_dir); ++i) {
         path_buffer[i] = input_dir[i];
     }
     path_buffer[sizeof(input_dir) - 1] = '/';
@@ -348,7 +335,7 @@ static i32 open_keyboards(
         }
 
         struct dirent *dent = (void *)((char *)dents + dents_pos);
-        i32 dent_name_len = dent->reclen - (dent->name - (char *)dent);
+        i32 dent_name_len = dent->reclen - (i32)(dent->name - (char *)dent);
         for (i32 i = 0; i < dent_name_len; ++i) {
             name_buffer[i] = dent->name[i];
         }
@@ -901,7 +888,7 @@ enum drm_event_type {
 static i32 drm_mode_handle_events(i32 fd, struct arena temp_arena) {
     i32 flip_complete = 0;
 
-    char *buffer = alloc(&temp_arena, 4096);
+    void *buffer = alloc(&temp_arena, 4096);
     i64 len = read(fd, buffer, 4096);
     if (len < 0) {
         return (i32)len;
@@ -909,7 +896,7 @@ static i32 drm_mode_handle_events(i32 fd, struct arena temp_arena) {
 
     i64 i = 0;
     while (i < len) {
-        struct drm_event *e = (struct drm_event *)(buffer + i);
+        struct drm_event *e = (struct drm_event *)(void *)((char *)buffer + i);
         if (e->type == DRM_EVENT_TYPE_FLIP_COMPLETE) {
             flip_complete = 1;
         }
@@ -953,7 +940,7 @@ static void clear_game(struct game_state *state) {
     state->timestep = 66L * 1000L * 1000L;
     state->steps = 0;
 
-    for (i32 i = 0; i < sizeof(state->board); ++i) {
+    for (u64 i = 0; i < sizeof(state->board); ++i) {
         state->board[i] = 0;
     }
 
@@ -1041,7 +1028,7 @@ static void draw_partial(
         if (state->vy < 0 && yoff < scale - partial) {
             continue;
         }
-        u32 cy = cy = y + (state->y + state->vy) * scale + yoff;
+        u32 cy = cy = y + (u32)(state->y + state->vy) * scale + yoff;
         for (u32 xoff = 0; xoff < scale; ++xoff) {
             if (state->vx > 0 && xoff >= partial) {
                 continue;
@@ -1049,7 +1036,7 @@ static void draw_partial(
             if (state->vx < 0 && xoff < scale - partial) {
                 continue;
             }
-            u32 cx = x + (state->x + state->vx) * scale + xoff;
+            u32 cx = x + (u32)(state->x + state->vx) * scale + xoff;
             u32 pixel_index = cy * buf->stride + cx;
             buf->map[pixel_index] = (u32)COLOR_BLUE;
         }
@@ -1075,6 +1062,8 @@ enum main_error {
 };
 
 i32 main(i32 argc, char **argv) {
+    (void)argc;
+    (void)argv;
     i64 arena_size = 2000 * 4096;
     char *mem = mmap(
         0,
@@ -1362,7 +1351,7 @@ i32 main(i32 argc, char **argv) {
                     board_x,
                     board_y,
                     scale,
-                    (i32)((elapsed * (i64)scale) / game_state.timestep)
+                    (u32)((elapsed * (i64)scale) / game_state.timestep)
                 );
                 error = drm_mode_crtc_page_flip(
                     card_fd,
