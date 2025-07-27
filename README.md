@@ -28,7 +28,7 @@ make
 sudo ./dumb_cycle
 ```
 
-![DumbCycle](https://musing.permutationlock.com/static/dumb_cycle.gif)
+![DumbCycle](https://musing.permutationlock.com/dumb_cycle/dumb_cycle.gif)
 
 You can also run the game in a virtual machine if you install [QEMU][9] and
 [tiger vnc][10].
@@ -65,6 +65,6 @@ and toybox yourself a corresponding [`vm_src.tar.gz`][12] is provided.
 [8]: https://www.gnu.org/software/binutils/
 [9]: https://www.qemu.org/
 [10]: https://tigervnc.org/
-[11]: https://musing.permutationlock.com/static/vm.tar.gz
-[12]: https://musing.permutationlock.com/static/vm_src.tar.gz
-[13]: https://musing.permutationlock.com/posts/blog-dumb-cycle.html
+[11]: https://musing.permutationlock.com/dumb_cycle/vm.tar.gz
+[12]: https://musing.permutationlock.com/dumb_cycle/vm_src.tar.gz
+[13]: https://musing.permutationlock.com/dumb_cycle/
