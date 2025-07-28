@@ -1,14 +1,12 @@
 # DumbCycle
 
-A commit-by-commit[^1] (hopefully) instructional example of how to make a game
+A (hopefully) instructional example of how to make a game
 using the dumb frame buffer interface of the Linux Direct Rendering Manager.
 The entire game is ~1000 lines of
 C99 code with a small `x86_64` assembly runtime. No libraries or preprocessor
 directives were allowed, even libc.
 
-The intent is for a reader to step through each commit, starting from
-a basic executable and building up to a double buffered snake/LightCycle game.
-I also [wrote an article][13] going through the development step-by-step.
+I [wrote an article][13] going through the development step-by-step.
 
 ## Requirements
 
