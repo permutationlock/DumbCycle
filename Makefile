@@ -44,5 +44,5 @@ test: dumb_cycle vm
 		-no-reboot
 
 vm:
-	curl -o vm.tar.gz https://musing.permutationlock.com/static/vm.tar.gz
+	curl -o vm.tar.gz https://musing.permutationlock.com/dumb_cycle/vm.tar.gz
 	tar -xvf vm.tar.gz
