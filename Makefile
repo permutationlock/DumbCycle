@@ -1,12 +1,11 @@
-CC ?= gcc
-CFLAGS ?= -fno-stack-protector -std=c99 -pedantic \
-	-fsanitize-trap -fsanitize=undefined,unreachable \
+CC = gcc
+CFLAGS = -ffreestanding -fno-stack-protector -std=c99 -pedantic \
 	-Wall -Wextra -Wshadow -Wconversion -Wdouble-promotion -Winit-self \
 	-Wcast-align -Wstrict-prototypes -Wold-style-definition
-LD ?= ld
-LDFLAGS ?=
-AS ?= as
-ASFLAGS ?=
+LD = ld
+LDFLAGS =
+AS = as
+ASFLAGS =
 
 all: dumb_cycle
 

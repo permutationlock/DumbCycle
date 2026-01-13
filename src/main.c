@@ -13,25 +13,6 @@ u64 syscall4(u64 scid, u64 a1, u64 a2, u64 a3, u64 a4);
 u64 syscall5(u64 scid, u64 a1, u64 a2, u64 a3, u64 a4, u64 a5);
 u64 syscall6(u64 scid, u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6);
 
-void *memcpy(void *restrict dst, const void *restrict src, u64 len) {
-    const char *src_bytes = src;
-    char *dst_bytes = dst;
-    for (u64 i = 0; i < len; i += 1) {
-        dst_bytes[i] = src_bytes[i];
-    }
-
-    return dst;
-}
-
-void *memset(void *mem, int val, u64 len) {
-    char *mem_bytes = mem;
-    for (u64 i = 0; i < len; i += 1) {
-        mem_bytes[i] = (char)val;
-    }
-
-    return mem;
-}
-
 enum syscall {
     SYS_READ = 0,
     SYS_WRITE = 1,
@@ -43,6 +24,7 @@ enum syscall {
     SYS_EXIT = 60,
     SYS_GETDENTS = 78,
     SYS_CLOCK_GETTIME = 228,
+    SYS_OPENAT = 257,
 };
 
 enum error_code {
@@ -215,6 +197,26 @@ static i64 time_since_ns(struct timespec *end, struct timespec *start) {
     return (seconds * 1000L * 1000L * 1000L) + end->nsec - start->nsec;
 }
 
+static i32 openat(i32 dfd, char *fname, i32 mode, i32 flags) {
+    u64 return_value;
+    i32 error;
+    do {
+        return_value = syscall4(
+            SYS_OPENAT,
+            (u64)dfd,
+            (u64)fname,
+            (u64)mode,
+            (u64)flags
+        );
+        error = syscall_error(return_value);
+    } while (error == EINTR);
+
+    if (error != 0) {
+        return -error;
+    }
+    return (i32)return_value;
+}
+
 enum std_fd {
     STDIN = 0,
     STDOUT = 1,
@@ -316,12 +318,6 @@ static i32 open_keyboards(
     }
 
     void *dents = alloc(&temp_arena, 1024);
-    char path_buffer[sizeof(input_dir) + 1024];
-    for (u64 i = 0; i < sizeof(input_dir); ++i) {
-        path_buffer[i] = input_dir[i];
-    }
-    path_buffer[sizeof(input_dir) - 1] = '/';
-    char *name_buffer = &path_buffer[sizeof(input_dir)];
 
     i64 dents_pos = 0;
     i64 dents_len = 0;
@@ -335,14 +331,10 @@ static i32 open_keyboards(
         }
 
         struct dirent *dent = (void *)((char *)dents + dents_pos);
-        i32 dent_name_len = dent->reclen - (i32)(dent->name - (char *)dent);
-        for (i32 i = 0; i < dent_name_len; ++i) {
-            name_buffer[i] = dent->name[i];
-        }
         dents_pos += dent->reclen;
 
-        i32 keyboard_fd = open(path_buffer, O_RDONLY, 0);
-        if (keyboard_fd >= 0 && !is_keyboard(keyboard_fd)) {
+        i32 keyboard_fd = openat(input_dir_fd, dent->name, O_RDONLY, 0);
+        if (keyboard_fd < 0 || !is_keyboard(keyboard_fd)) {
             close(keyboard_fd);
             continue;
         }
